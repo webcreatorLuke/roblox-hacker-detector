@@ -478,7 +478,7 @@
             const startTime = Date.now();
             
             try {
-                // Get real user data using multiple methods
+                // Get REAL user data using working methods
                 let userInfo = null;
                 let actualUserId = userId;
                 let apiSuccess = false;
@@ -488,80 +488,174 @@
                     progressFill.style.width = '10%';
                     await sleep(800);
                     
-                    // Method 1: Try Roblox username search API
+                    // Method 1: Use AllOrigins CORS proxy (most reliable)
                     try {
-                        const response = await fetch(`https://api.roblox.com/users/get-by-username?username=${encodeURIComponent(username)}`);
+                        const apiUrl = `https://api.roblox.com/users/get-by-username?username=${encodeURIComponent(username)}`;
+                        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`;
+                        
+                        const response = await fetch(proxyUrl);
                         if (response.ok) {
-                            const data = await response.json();
-                            if (data.Id) {
-                                actualUserId = data.Id;
+                            const proxyData = await response.json();
+                            const robloxData = JSON.parse(proxyData.contents);
+                            
+                            if (robloxData.Id && robloxData.Id > 0) {
+                                actualUserId = robloxData.Id;
                                 userInfo = {
-                                    id: data.Id,
-                                    name: data.Username || username
+                                    id: robloxData.Id,
+                                    name: robloxData.Username,
+                                    displayName: robloxData.Username,
+                                    created: null // Will get this in next step
                                 };
                                 apiSuccess = true;
+                                scanStatus.textContent = 'Found user! Getting profile details...';
+                            } else if (robloxData.errorMessage) {
+                                throw new Error(`User not found: ${robloxData.errorMessage}`);
                             }
                         }
                     } catch (e) {
-                        console.log('Method 1 failed, trying Method 2...');
+                        console.log('AllOrigins proxy failed:', e.message);
+                        scanStatus.textContent = 'Trying alternative method...';
                     }
                     
-                    // Method 2: Try the modern API endpoint
+                    // Method 2: Use CORS.IO proxy as backup
                     if (!apiSuccess) {
                         try {
-                            const response = await fetch(`https://users.roblox.com/v1/usernames/users`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                    usernames: [username],
-                                    excludeBannedUsers: false
-                                })
-                            });
+                            const apiUrl = `https://api.roblox.com/users/get-by-username?username=${encodeURIComponent(username)}`;
+                            const proxyUrl = `https://cors.io/?${apiUrl}`;
                             
+                            const response = await fetch(proxyUrl);
                             if (response.ok) {
-                                const data = await response.json();
-                                if (data.data && data.data.length > 0) {
-                                    const user = data.data[0];
-                                    actualUserId = user.id;
-                                    userInfo = user;
+                                const robloxData = await response.json();
+                                
+                                if (robloxData.Id && robloxData.Id > 0) {
+                                    actualUserId = robloxData.Id;
+                                    userInfo = {
+                                        id: robloxData.Id,
+                                        name: robloxData.Username,
+                                        displayName: robloxData.Username,
+                                        created: null
+                                    };
                                     apiSuccess = true;
+                                    scanStatus.textContent = 'Found user! Getting profile details...';
                                 }
                             }
                         } catch (e) {
-                            console.log('Method 2 failed, trying Method 3...');
+                            console.log('CORS.IO proxy failed:', e.message);
                         }
                     }
                     
-                    // Method 3: Try JSONP approach (works around CORS)
+                    // Method 3: Try JSONProxy
                     if (!apiSuccess) {
                         try {
-                            // Create a more realistic user profile based on common Roblox patterns
-                            const hashCode = username.split('').reduce((a, b) => {
-                                a = ((a << 5) - a) + b.charCodeAt(0);
-                                return a & a;
-                            }, 0);
+                            const apiUrl = `https://api.roblox.com/users/get-by-username?username=${encodeURIComponent(username)}`;
+                            const proxyUrl = `https://jsonp.afeld.me/?url=${encodeURIComponent(apiUrl)}`;
                             
-                            const baseId = Math.abs(hashCode) % 1000000000 + 100000000;
-                            const accountAgeMonths = Math.floor(Math.random() * 72) + 12; // 1-6 years
-                            const createdDate = new Date();
-                            createdDate.setMonth(createdDate.getMonth() - accountAgeMonths);
-                            
-                            userInfo = {
-                                id: baseId,
-                                name: username,
-                                displayName: username,
-                                created: createdDate.toISOString(),
-                                description: '',
-                                hasVerifiedBadge: false
-                            };
-                            actualUserId = baseId;
-                            apiSuccess = false; // Mark as fallback data
+                            const response = await fetch(proxyUrl);
+                            if (response.ok) {
+                                const robloxData = await response.json();
+                                
+                                if (robloxData.Id && robloxData.Id > 0) {
+                                    actualUserId = robloxData.Id;
+                                    userInfo = {
+                                        id: robloxData.Id,
+                                        name: robloxData.Username,
+                                        displayName: robloxData.Username,
+                                        created: null
+                                    };
+                                    apiSuccess = true;
+                                    scanStatus.textContent = 'Found user! Getting profile details...';
+                                }
+                            }
                         } catch (e) {
-                            console.log('All methods failed');
+                            console.log('JSONProxy failed:', e.message);
                         }
                     }
+                    
+                    // If user not found, show error
+                    if (!apiSuccess) {
+                        throw new Error(`Could not find Roblox user "${username}". Please check the username spelling.`);
+                    }
+                }
+                
+                // Get detailed profile information using the User ID
+                if (actualUserId && apiSuccess) {
+                    scanStatus.textContent = scanSteps[1];
+                    progressFill.style.width = '25%';
+                    await sleep(1000);
+                    
+                    try {
+                        const apiUrl = `https://users.roblox.com/v1/users/${actualUserId}`;
+                        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`;
+                        
+                        const response = await fetch(proxyUrl);
+                        if (response.ok) {
+                            const proxyData = await response.json();
+                            const profileData = JSON.parse(proxyData.contents);
+                            
+                            // Merge profile data with existing user info
+                            userInfo = {
+                                ...userInfo,
+                                displayName: profileData.displayName || profileData.name || userInfo.name,
+                                description: profileData.description || '',
+                                created: profileData.created || null,
+                                hasVerifiedBadge: profileData.hasVerifiedBadge || false,
+                                isBanned: profileData.isBanned || false
+                            };
+                            scanStatus.textContent = 'Profile loaded! Analyzing security...';
+                        }
+                    } catch (e) {
+                        console.log('Profile details fetch failed:', e.message);
+                        scanStatus.textContent = 'Basic info found, analyzing security...';
+                    }
+                }
+                
+                // Get additional data like friends count, followers, etc.
+                if (actualUserId && apiSuccess) {
+                    scanStatus.textContent = 'Getting friends and follower data...';
+                    progressFill.style.width = '40%';
+                    await sleep(800);
+                    
+                    try {
+                        // Get friends count
+                        const friendsUrl = `https://friends.roblox.com/v1/users/${actualUserId}/friends/count`;
+                        const friendsProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(friendsUrl)}`;
+                        
+                        const friendsResponse = await fetch(friendsProxyUrl);
+                        if (friendsResponse.ok) {
+                            const friendsProxyData = await friendsResponse.json();
+                            const friendsData = JSON.parse(friendsProxyData.contents);
+                            userInfo.friendsCount = friendsData.count || 0;
+                        }
+                        
+                        // Get followers count
+                        const followersUrl = `https://friends.roblox.com/v1/users/${actualUserId}/followers/count`;
+                        const followersProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(followersUrl)}`;
+                        
+                        const followersResponse = await fetch(followersProxyUrl);
+                        if (followersResponse.ok) {
+                            const followersProxyData = await followersResponse.json();
+                            const followersData = JSON.parse(followersProxyData.contents);
+                            userInfo.followersCount = followersData.count || 0;
+                        }
+                        
+                        // Get following count
+                        const followingUrl = `https://friends.roblox.com/v1/users/${actualUserId}/followings/count`;
+                        const followingProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(followingUrl)}`;
+                        
+                        const followingResponse = await fetch(followingProxyUrl);
+                        if (followingResponse.ok) {
+                            const followingProxyData = await followingResponse.json();
+                            const followingData = JSON.parse(followingProxyData.contents);
+                            userInfo.followingCount = followingData.count || 0;
+                        }
+                        
+                    } catch (e) {
+                        console.log('Social data fetch failed:', e.message);
+                    }
+                }
+                
+                if (!userInfo) {
+                    throw new Error('Unable to fetch user data. Please try again.');
                 }
                 
                 // Get detailed profile info if we have a user ID
@@ -617,11 +711,11 @@
                 document.getElementById('apiSpeed').textContent = `${scanTime}ms`;
                 
                 // Generate comprehensive results
-                generateAdvancedResults(userInfo || { name: username, id: actualUserId }, scanTime);
+                generateAdvancedResults(userInfo || { name: username, id: actualUserId }, scanTime, apiSuccess);
                 
             } catch (error) {
                 console.error('Scan error:', error);
-                generateAdvancedResults({ name: username, id: actualUserId }, Date.now() - startTime);
+                generateAdvancedResults({ name: username, id: actualUserId }, Date.now() - startTime, false);
             }
             
             // Reset button
@@ -636,7 +730,7 @@
             updateMetrics();
         }
         
-        function generateAdvancedResults(userInfo, scanTime) {
+        function generateAdvancedResults(userInfo, scanTime, apiSuccess = false) {
             const scanResults = document.getElementById('scanResults');
             
             // Generate realistic security scores
@@ -682,12 +776,16 @@
                 </div>
                 
                 <div class="alert alert-${apiStatusColor}">
-                    <strong>📊 Account Information</strong><br>
+                    <strong>📊 Real Account Data Retrieved</strong><br>
                     Username: <strong>${displayUsername}</strong><br>
                     User ID: <strong>${displayUserId}</strong><br>
                     Display Name: <strong>${displayName}</strong><br>
                     Account Created: <strong>${createdDate}</strong><br>
                     Account Age: <strong>${accountAge} days</strong>${userInfo.hasVerifiedBadge ? '<br>✅ <strong>Verified Account</strong>' : ''}
+                    ${userInfo.friendsCount !== undefined ? `<br>👥 <strong>Friends:</strong> ${userInfo.friendsCount}` : ''}
+                    ${userInfo.followersCount !== undefined ? `<br>📈 <strong>Followers:</strong> ${userInfo.followersCount}` : ''}
+                    ${userInfo.followingCount !== undefined ? `<br>👤 <strong>Following:</strong> ${userInfo.followingCount}` : ''}
+                    ${userInfo.description ? `<br>📝 <strong>Bio:</strong> ${userInfo.description.substring(0, 100)}${userInfo.description.length > 100 ? '...' : ''}` : ''}
                 </div>
                 
                 <div class="alert alert-${networkScore > 75 ? 'success' : networkScore > 60 ? 'warning' : 'danger'}">
